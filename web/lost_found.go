@@ -117,11 +117,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 				dict.Token = enbase([]byte(username + string(time.Now().Unix())))
 				dict.Flag = 1
 			}
-			// dict.data = append(dict.data, tem_data)
-			// fmt.Println(tem_data.id, tem_data.username, tem_data.password, tem_data.create_time)
-
 			dict.Username = tem_data.Username
-			// io.WriteString(w, string(dict_json))
 		}
 		dict_json, _ := json.Marshal(dict)
 		result = string(dict_json)
