@@ -4,34 +4,45 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
+	"math"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	_ "github.com/Go-SQL-Driver/MySQL"
 )
 
+const (
+	upload_path = "."
+)
+
 type dic struct {
-	Flag     int
-	Msg      string
-	Token    string
-	Username string
-	Data     []Goodsinfo
+	Flag        int
+	Msg         string
+	Token       string
+	Username    string
+	Total_count int
+	Data        []Goodsinfo
+	Total_page  int
 }
 
 type Goodsinfo struct {
-	goodsid     int
-	goodsname   string
-	address     string
-	pic         string
-	phone       string
-	userid      int
-	create_time string
-	update_time string
-	view_count  int
-	status      int
-	is_return   int
+	Goodsid     int
+	Goodsname   string
+	Address     string
+	Pic         string
+	Phone       string
+	Des         string
+	Userid      int
+	Create_time string
+	Update_time string
+	View_count  int
+	Status      int
+	Is_return   int
 }
 
 type Userinfo struct {
@@ -42,11 +53,46 @@ type Userinfo struct {
 }
 
 func index(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	r.ParseForm()
+	res_page := r.URL.Query()["page"][0]
+	if res_page == "" {
+		res_page = "1"
+	}
+	// fmt.Println("page", res_page)
+	dict := dic{}
+	tem_goods := Goodsinfo{}
+	page, _ := strconv.Atoi(res_page)
+	db, err := sql.Open("mysql", "root:12345678@tcp(127.0.0.1:3306)/lost_and_found?charset=utf8")
+	errorHandle(err, w)
+	rows, err := db.Query("select * from lost_goods where status = ? limit ?,?", 1, (int(page)-1)*8, int(page)*8)
+	errorHandle(err, w)
+	db.QueryRow("select count(*) from lost_goods where status = ?", 1).Scan(&dict.Total_count)
+	dict.Total_page = int(math.Ceil(float64(dict.Total_count) / 8.0))
+	errorHandle(err, w)
+	for rows.Next() {
+		rows.Scan(&tem_goods.Goodsid, &tem_goods.Goodsname, &tem_goods.Address, &tem_goods.Pic, &tem_goods.Phone, &tem_goods.Des, &tem_goods.Userid, &tem_goods.Create_time, &tem_goods.Update_time, &tem_goods.View_count, &tem_goods.Status, &tem_goods.Is_return)
+		dict.Data = append(dict.Data, tem_goods)
+	}
+	dict_json, _ := json.Marshal(dict)
+	result := string(dict_json)
+	fmt.Fprint(w, result)
+}
+
+func showPicHandle(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	file, err := os.Open(upload_path + req.URL.Path)
+	errorHandle(err, w)
+	defer file.Close()
+	buff, err := ioutil.ReadAll(file)
+	errorHandle(err, w)
+	w.Write(buff)
 }
 
 func login(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	dict := dic{}
 	tem_data := Userinfo{}
@@ -79,6 +125,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 		}
 		dict_json, _ := json.Marshal(dict)
 		result = string(dict_json)
+		db.Close()
 	}
 	fmt.Fprintf(w, string(result))
 }
@@ -121,12 +168,15 @@ func register(w http.ResponseWriter, r *http.Request) {
 		result = string(dict_json)
 		fmt.Println(result)
 	}
+	db.Close()
 	fmt.Fprintf(w, result)
 }
 func main() {
+
 	http.HandleFunc("/", index)
 	http.HandleFunc("/login", login)
 	http.HandleFunc("/register", register)
+	http.HandleFunc("/media/", showPicHandle)
 	err := http.ListenAndServe(":8000", nil)
 	if err != nil {
 		log.Fatal("ListenAndServe:", err)
