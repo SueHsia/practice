@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"math"
@@ -142,11 +143,11 @@ func register(w http.ResponseWriter, r *http.Request) {
 		rows := db.QueryRow("select * from pi_user where username = ?", username)
 		rows.Scan(&tem_data.Userid, &tem_data.Username, &tem_data.Password, &tem_data.Create_time)
 		if password != repassword {
-			fmt.Println("111")
+			// fmt.Println("111")
 			dict.Msg = "密码不一致，注册失败！"
 			dict.Flag = 0
 		} else if tem_data.Username != "" {
-			fmt.Println("222")
+			// fmt.Println("222")
 			dict.Msg = "用户已存在，注册失败"
 			dict.Flag = 0
 		} else {
@@ -167,12 +168,61 @@ func register(w http.ResponseWriter, r *http.Request) {
 	db.Close()
 	fmt.Fprintf(w, result)
 }
-func main() {
 
+func publish(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "multipart/form-data")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	db, err := sql.Open("mysql", "root:12345678@tcp(127.0.0.1:3306)/lost_and_found?charset=utf8")
+	errorHandle(err, w)
+	dict := dic{}
+	tem_user := Userinfo{}
+	tem_goods := Goodsinfo{}
+	var ext string
+	r.ParseForm()
+	uploadFile, handle, err := r.FormFile("file")
+	errorHandle(err, w)
+	var result string
+	if r.Method == "POST" {
+		tm := time.Unix(time.Now().Unix(), 0)
+		tem_goods.Address = r.Form["address"][0]
+		tem_user.Username = r.Form["username"][0]
+		tem_goods.Goodsname = r.Form["name"][0]
+		tem_goods.Userid, _ = strconv.Atoi(r.Form["userid"][0])
+		tem_goods.Phone = r.Form["phone"][0]
+		tem_goods.Des = r.Form["des"][0]
+		name := strings.Split(handle.Filename, ".")
+		ext = strings.ToLower(name[len(name)-1])
+		fileDir := fmt.Sprintf("./media/file/%v/", tm.Format("2006-01-02"))
+		second := strconv.FormatInt(time.Now().Unix(), 10)
+		filename := fileDir + second + "." + ext
+		//保存图片
+		os.Mkdir(fileDir, 0777)
+		saveFile, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE, 0666)
+		errorHandle(err, w)
+		io.Copy(saveFile, uploadFile)
+		defer uploadFile.Close()
+		defer saveFile.Close()
+		tem_goods.Pic = filename[1:]
+		stmt, err := db.Prepare("INSERT lost_goods SET name=?,address=?,pic=?,phone=?,des=?,user_id=?,create_time=?,update_time=?,view_count=?,status=?,is_return=?")
+		errorHandle(err, w)
+		stmt.Exec(tem_goods.Goodsname, tem_goods.Address, tem_goods.Pic, tem_goods.Phone, tem_goods.Des, tem_goods.Userid, tm.Format("2006-01-02 15:04:05"), tm.Format("2006-01-02 15:04:05"), 0, 1, 0)
+		dict.Msg = "注册成功"
+		dict.Flag = 1
+		// 上传图片成功
+		dict_json, err := json.Marshal(dict)
+		errorHandle(err, w)
+		result = string(dict_json)
+	}
+	db.Close()
+	fmt.Fprintf(w, result)
+}
+
+func main() {
 	http.HandleFunc("/", index)
 	http.HandleFunc("/login", login)
 	http.HandleFunc("/register", register)
 	http.HandleFunc("/media/", showPicHandle)
+	http.HandleFunc("/publish", publish)
 	err := http.ListenAndServe(":8000", nil)
 	if err != nil {
 		log.Fatal("ListenAndServe:", err)
