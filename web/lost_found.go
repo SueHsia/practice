@@ -61,6 +61,7 @@ func index(w http.ResponseWriter, r *http.Request) {
 	if res_page == "" {
 		res_page = "1"
 	}
+
 	// fmt.Println("page", res_page)
 	dict := dic{}
 	tem_goods := Goodsinfo{}
@@ -217,12 +218,39 @@ func publish(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, result)
 }
 
+func detail(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	fmt.Println("001")
+	var result string
+	tem_goods := Goodsinfo{}
+	db, err := sql.Open("mysql", "root:12345678@tcp(127.0.0.1:3306)/lost_and_found?charset=utf8")
+	errorHandle(err, w)
+	r.ParseForm()
+	goods_id, _ := strconv.Atoi(r.URL.Query()["goods_id"][0])
+	fmt.Println(goods_id)
+	rows := db.QueryRow("select * from lost_goods where id = ?", goods_id)
+	rows.Scan(&tem_goods.Goodsid, &tem_goods.Goodsname, &tem_goods.Address, &tem_goods.Pic, &tem_goods.Phone, &tem_goods.Des, &tem_goods.Userid, &tem_goods.Create_time, &tem_goods.Update_time, &tem_goods.View_count, &tem_goods.Status, &tem_goods.Is_return)
+	stmt, err := db.Prepare("update lost_goods set view_count=? where id=?")
+	errorHandle(err, w)
+	stmt.Exec(tem_goods.View_count+1, tem_goods.Goodsid)
+	dict := dic{}
+	db.Close()
+	dict.Data = append(dict.Data, tem_goods)
+	dict_json, err := json.Marshal(dict)
+	errorHandle(err, w)
+	result = string(dict_json)
+	fmt.Println(result)
+	fmt.Fprintf(w, result)
+}
+
 func main() {
-	http.HandleFunc("/", index)
 	http.HandleFunc("/login", login)
 	http.HandleFunc("/register", register)
 	http.HandleFunc("/media/", showPicHandle)
 	http.HandleFunc("/publish", publish)
+	http.HandleFunc("/detail", detail)
+	http.HandleFunc("/", index)
 	err := http.ListenAndServe(":8000", nil)
 	if err != nil {
 		log.Fatal("ListenAndServe:", err)
