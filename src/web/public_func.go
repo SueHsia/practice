@@ -4,11 +4,15 @@ import (
 	"crypto/md5"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	_ "github.com/Go-SQL-Driver/MySQL"
+	"github.com/garyburd/redigo/redis"
 )
 
 func md5V(str string) string {
@@ -43,6 +47,12 @@ func errorHandle(err error, w http.ResponseWriter) {
 	}
 }
 
+func errorPrint(err error) {
+	if err != nil {
+		fmt.Println(err)
+	}
+}
+
 func validate(str string) (username string, userid int, is_valid bool) {
 	content := strings.Split(debase(str), ",")
 	token_time, _ := strconv.ParseInt(content[len(content)-1], 10, 64)
@@ -57,6 +67,33 @@ func validate(str string) (username string, userid int, is_valid bool) {
 	return username, userid, is_valid
 }
 
+func mysql_redis(goodsId int, viewCount int) string {
+	c, err := redis.Dial("tcp", "127.0.0.1:6379")
+	if err != nil {
+		fmt.Println("Connect to redis error", err)
+	}
+	defer c.Close()
+
+	// db, err = sql.Open("mysql", "root:12345678@tcp(127.0.0.1:3306)/lost_and_found?charset=utf8")
+	errorPrint(err)
+	curName := fmt.Sprintf("viewCount-%v", goodsId)
+
+	is_key_exit, err := redis.Bool(c.Do("EXISTS", curName))
+
+	if is_key_exit == false {
+		curResult := fmt.Sprintf("%v-%v", viewCount, time.Now().Unix())
+		_, err = c.Do("SET", curName, curResult)
+	} else {
+		curResult, _ := redis.String(c.Do("GET", curName))
+		result := strings.Split(curResult, "-")
+		viewCount, err = strconv.Atoi(result[0])
+		newResult := fmt.Sprintf("%v-%v", viewCount+1, result[1])
+		_, err = c.Do("SET", curName, newResult)
+	}
+	redisCount, _ := redis.String(c.Do("GET", curName))
+	return redisCount
+}
+
 // func main() {
 // 	tm1 := time.Now().Unix()
 // 	input := enbase("hello")
@@ -66,4 +103,8 @@ func validate(str string) (username string, userid int, is_valid bool) {
 // 	tm2 := time.Now().Unix()
 // 	fmt.Println("间隔", tm2+100-tm1)
 // 	fmt.Println(debase("9OXd9PGoraitsbO0r7Owsq60"))
+// 	mysql_redis(1)
+// 	c, _ := redis.Dial("tcp", "127.0.0.1:6379")
+// 	curResult, _ := redis.String(c.Do("GET", "view_count"))
+// 	fmt.Println(curResult)
 // }

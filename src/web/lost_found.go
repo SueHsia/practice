@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/garyburd/redigo/redis"
+
 	_ "github.com/Go-SQL-Driver/MySQL"
 	"github.com/gorilla/mux"
 )
@@ -23,7 +25,8 @@ const (
 )
 
 var (
-	db *sql.DB
+	db        *sql.DB
+	pubUserid int
 )
 
 type dic struct {
@@ -170,20 +173,21 @@ func publish(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "multipart/form-data")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	dict := dic{}
-	var result string
 	temUser := Userinfo{}
 	temGoods := Goodsinfo{}
-	var ext string
-	var curUsername string
-	var curUserid int
-	var isValid bool
+	var (
+		ext         string
+		isValid     bool
+		result      string
+		curUsername string
+	)
 	r.ParseForm()
 	if r.Method == "OPTIONS" {
 		fmt.Fprintf(w, "")
 		return
 	} else if r.Method == "GET" {
 		token := r.Form["token"][0]
-		curUsername, curUserid, isValid = validate(token)
+		curUsername, pubUserid, isValid = validate(token)
 		if !isValid {
 			dict.Msg = "登录失效，请重新登录"
 			dict.Flag = 0
@@ -193,8 +197,6 @@ func publish(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, result)
 			return
 		}
-		fmt.Fprintf(w, "")
-		return
 	} else if r.Method == "POST" {
 		uploadFile, handle, err := r.FormFile("file")
 		errorHandle(err, w)
@@ -202,7 +204,7 @@ func publish(w http.ResponseWriter, r *http.Request) {
 		temGoods.Address = r.Form["address"][0]
 		temUser.Username = curUsername
 		temGoods.Goodsname = r.Form["name"][0]
-		temGoods.Userid = curUserid
+		temGoods.Userid = pubUserid
 		temGoods.Phone = r.Form["phone"][0]
 		temGoods.Des = r.Form["des"][0]
 		name := strings.Split(handle.Filename, ".")
@@ -228,7 +230,6 @@ func publish(w http.ResponseWriter, r *http.Request) {
 		errorHandle(err, w)
 		result = string(dictJSON)
 		fmt.Fprintf(w, result)
-		return
 	}
 }
 
@@ -237,32 +238,32 @@ func detail(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	r.ParseForm()
+	con, err := redis.Dial("tcp", "127.0.0.1:6379")
+	errorPrint(err)
 	temGoods := Goodsinfo{}
 	dict := dic{}
-	var token string
 	var goodsID string
 	if r.Method == "OPTIONS" {
 		fmt.Fprintf(w, "")
 		return
 	} else if r.Method == "GET" {
-		token = r.Form["token"][0]
 		goodsID = r.Form["goods_id"][0]
-		_, _, isValid := validate(token)
-		if !isValid {
-			dict.Msg = "登录失效，请重新登录"
-			dict.Flag = 0
-			dictJSON, err := json.Marshal(dict)
-			errorHandle(err, w)
-			result := string(dictJSON)
-			fmt.Fprintf(w, result)
-			return
-		}
 		rows := db.QueryRow("select * from lost_goods where id = ?", goodsID)
 		rows.Scan(&temGoods.Goodsid, &temGoods.Goodsname, &temGoods.Address, &temGoods.Pic, &temGoods.Phone, &temGoods.Des, &temGoods.Userid, &temGoods.Create_time, &temGoods.Update_time, &temGoods.View_count, &temGoods.Status, &temGoods.Is_return)
 		stmt, err := db.Prepare("update lost_goods set view_count=? where id=?")
 		errorHandle(err, w)
-		count := temGoods.View_count + 1
-		stmt.Exec(count, temGoods.Goodsid)
+		redisCount := strings.Split(mysql_redis(temGoods.Goodsid, temGoods.View_count), "-")
+		curName := fmt.Sprintf("viewCount-%v", goodsID)
+		oriTime, err := strconv.ParseInt(redisCount[1], 10, 64)
+		errorPrint(err)
+		count, _ := strconv.Atoi(redisCount[0])
+		temGoods.View_count = count
+		curTime := time.Now().Unix()
+		if curTime-oriTime >= 20 {
+			stmt.Exec(count, temGoods.Goodsid)
+			redisContent := fmt.Sprintf("%v-%v", count, curTime)
+			_, err = con.Do("SET", curName, redisContent)
+		}
 		dict.Data = append(dict.Data, temGoods)
 		dictJSON, err := json.Marshal(dict)
 		errorHandle(err, w)
